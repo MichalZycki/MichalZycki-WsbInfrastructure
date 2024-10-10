@@ -1,0 +1,41 @@
+$subscriptionId = "xxxxxxxxxxxxxxxxx"
+$wsbid = "xxxxxxxxxxx"
+$resourceGroupName = "wsbrg$wsbid"
+$location = "northeurope"
+$vmName = "sqlvm$wsbid"
+$adminUsername = "sqladmin"
+$adminPassword = "P@ssword123$wsbid"
+$vnetName = "wsbvnet$wsbid"
+$subnetName = "wsbsubnet$wsbid"
+$publicIpName = "wsbpublicIP$wsbid"
+$nsgName = "wsbnsg$wsbid"
+$nicName = "wsbnic$wsbid"
+$vmSize = "Standard_D8as_v4" #Standard_D8as_v4 / Standard_D2s_v3
+Set-AzContext -SubscriptionId $subscriptionId
+New-AzResourceGroup -Name $resourceGroupName -Location $location
+$vnet = New-AzVirtualNetwork -ResourceGroupName $resourceGroupName -Location $location -Name $vnetName -AddressPrefix "10.0.0.0/16"
+$subnet = Add-AzVirtualNetworkSubnetConfig -Name $subnetName -AddressPrefix "10.0.0.0/24" -VirtualNetwork $vnet
+$vnet | Set-AzVirtualNetwork
+$subnetId = $vnet.Subnets[0].Id
+$vnet = Get-AzVirtualNetwork -ResourceGroupName $resourceGroupName -Name $vnetName
+$subnetId = ($vnet.Subnets | Where-Object { $_.Name -eq $subnetName }).Id
+$publicIp = New-AzPublicIpAddress -Name $publicIpName -ResourceGroupName $resourceGroupName -Location $location -AllocationMethod Static
+$nsg = New-AzNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Location $location -Name $nsgName
+$nsgRuleRDP = New-AzNetworkSecurityRuleConfig -Name "Allow-RDP" `
+    -Description "Allow RDP" -Access Allow -Protocol Tcp -Direction Inbound `
+    -Priority 1000 -SourceAddressPrefix "*" -SourcePortRange "*" `
+    -DestinationAddressPrefix "*" -DestinationPortRange 3389
+$nsg.SecurityRules.Add($nsgRuleRDP)
+Set-AzNetworkSecurityGroup -NetworkSecurityGroup $nsg
+$nic = New-AzNetworkInterface -ResourceGroupName $resourceGroupName -Location $location -Name $nicName `
+    -SubnetId $subnetId -PublicIpAddressId $publicIp.Id -NetworkSecurityGroupId $nsg.Id
+$vmConfig = New-AzVMConfig -VMName $vmName -VMSize $vmSize
+$securePassword = ConvertTo-SecureString $adminPassword -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ($adminUsername, $securePassword)
+$vmConfig = Set-AzVMOperatingSystem -VM $vmConfig -Windows -ComputerName $vmName -Credential $cred -ProvisionVMAgent -EnableAutoUpdate
+$vmConfig = Add-AzVMNetworkInterface -VM $vmConfig -Id $nic.Id
+$vmConfig = Set-AzVMSourceImage -VM $vmConfig -PublisherName "MicrosoftSQLServer" -Offer "sql2022-ws2022" -Skus "sqldev-gen2" -Version "latest"
+$vmConfig = Set-AzVMBootDiagnostic -VM $vmConfig -Enable $false
+New-AzVM -ResourceGroupName $resourceGroupName -Location $location -VM $vmConfig
+$sqlVm = New-AzSqlVM -ResourceGroupName $resourceGroupName -Name $vmName -Location $location -LicenseType "PAYG" -SQLManagementType "Full"
+
