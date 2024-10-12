@@ -10,7 +10,7 @@ $subnetName = "wsbsubnet$wsbid"
 $publicIpName = "wsbpublicIP$wsbid"
 $nsgName = "wsbnsg$wsbid"
 $nicName = "wsbnic$wsbid"
-$vmSize = "Standard_D8as_v4" #Standard_D8as_v4 / Standard_D2s_v3
+$vmSize = "Standard_D8as_v4" #Standard_D8as_v4 / Standard_D2s_v3 / Standard_E4ds_v4
 Set-AzContext -SubscriptionId $subscriptionId
 New-AzResourceGroup -Name $resourceGroupName -Location $location
 $vnet = New-AzVirtualNetwork -ResourceGroupName $resourceGroupName -Location $location -Name $vnetName -AddressPrefix "10.0.0.0/16"
