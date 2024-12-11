@@ -1,0 +1,72 @@
+$subscriptionId = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+$wsbid = "xxxx"
+$resourceGroupName = "wsbrg$wsbid"
+$location = "northeurope"
+$vmName = "vm$wsbid"
+$adminUsername = "adminuser"
+$adminPassword = "P@ssword123$wsbid"
+$vnetName = "wsbvnet$wsbid"
+$subnetName = "wsbsubnet$wsbid"
+$publicIpName = "wsbpublicIP$wsbid"
+$nsgName = "wsbnsg$wsbid"
+$nicName = "wsbnic$wsbid"
+$vmSize = "Standard_D16a_v4" # Możesz dostosować rozmiar maszyny
+
+# Ustawienie kontekstu subskrypcji
+Set-AzContext -SubscriptionId $subscriptionId
+
+# Tworzenie grupy zasobów
+New-AzResourceGroup -Name $resourceGroupName -Location $location
+
+# Tworzenie sieci wirtualnej i podsieci
+$vnet = New-AzVirtualNetwork -ResourceGroupName $resourceGroupName -Location $location -Name $vnetName -AddressPrefix "10.0.0.0/16"
+$subnet = Add-AzVirtualNetworkSubnetConfig -Name $subnetName -AddressPrefix "10.0.0.0/24" -VirtualNetwork $vnet
+$vnet | Set-AzVirtualNetwork
+
+# Pobieranie ID podsieci
+$vnet = Get-AzVirtualNetwork -ResourceGroupName $resourceGroupName -Name $vnetName
+$subnetId = ($vnet.Subnets | Where-Object { $_.Name -eq $subnetName }).Id
+
+# Sprawdzenie, czy subnetId nie jest puste
+if (-not $subnetId) {
+    Write-Output "Błąd: ID podsieci jest puste. Sprawdź konfigurację sieci wirtualnej i podsieci."
+    exit
+}
+
+# Tworzenie publicznego adresu IP
+$publicIp = New-AzPublicIpAddress -Name $publicIpName -ResourceGroupName $resourceGroupName -Location $location -AllocationMethod Static
+
+# Tworzenie grupy zabezpieczeń sieciowych (NSG) i dodanie reguły dla RDP (port 3389)
+$nsg = New-AzNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Location $location -Name $nsgName
+$nsgRuleRDP = New-AzNetworkSecurityRuleConfig -Name "Allow-RDP" `
+    -Description "Allow RDP" -Access Allow -Protocol Tcp -Direction Inbound `
+    -Priority 1000 -SourceAddressPrefix "*" -SourcePortRange "*" `
+    -DestinationAddressPrefix "*" -DestinationPortRange 3389
+$nsg.SecurityRules.Add($nsgRuleRDP)
+Set-AzNetworkSecurityGroup -NetworkSecurityGroup $nsg
+
+# Tworzenie interfejsu sieciowego
+$nic = New-AzNetworkInterface -ResourceGroupName $resourceGroupName -Location $location -Name $nicName `
+    -SubnetId $subnetId -PublicIpAddressId $publicIp.Id -NetworkSecurityGroupId $nsg.Id
+
+# Sprawdzenie, czy interfejs sieciowy został poprawnie utworzony
+if (-not $nic.Id) {
+    Write-Output "Błąd: ID interfejsu sieciowego jest puste. Sprawdź konfigurację interfejsu."
+    exit
+}
+
+# Konfiguracja maszyny wirtualnej
+$vmConfig = New-AzVMConfig -VMName $vmName -VMSize $vmSize
+$securePassword = ConvertTo-SecureString $adminPassword -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential ($adminUsername, $securePassword)
+$vmConfig = Set-AzVMOperatingSystem -VM $vmConfig -Windows -ComputerName $vmName -Credential $cred -ProvisionVMAgent -EnableAutoUpdate
+$vmConfig = Add-AzVMNetworkInterface -VM $vmConfig -Id $nic.Id
+
+# Ustawienie obrazu systemu Windows Server
+$vmConfig = Set-AzVMSourceImage -VM $vmConfig -PublisherName "MicrosoftWindowsServer" -Offer "WindowsServer" -Skus "2022-Datacenter" -Version "latest"
+
+# Wyłączenie diagnostyki rozruchu
+$vmConfig = Set-AzVMBootDiagnostic -VM $vmConfig -Enable $false
+
+# Tworzenie maszyny wirtualnej
+New-AzVM -ResourceGroupName $resourceGroupName -Location $location -VM $vmConfig
